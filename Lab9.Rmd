@@ -1,0 +1,13 @@
+---
+title: "Lab8"
+author: "Adrián González, Jose Ordoñez, Daniela Ramírez"
+date: "2026-05-08"
+output: html_document
+---
+
+Link de Github: https://github.com/Ikeel04/Lab9-MD.git
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
