@@ -11,3 +11,181 @@ Link de Github: https://github.com/Ikeel04/Lab9-MD.git
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Librerías
+
+```{r librerias}
+library(nnet)
+library(caret)
+library(dplyr)
+library(ggplot2)
+```
+
+---
+
+## Carga y Preprocesamiento de Datos
+
+```{r carga-datos}
+load("listings.RData")
+
+listings$price <- as.numeric(gsub("[$,]", "", listings$price))
+
+p33 <- quantile(listings$price, 0.33, na.rm = TRUE)
+p66 <- quantile(listings$price, 0.66, na.rm = TRUE)
+
+listings$price_category <- cut(
+  listings$price,
+  breaks = c(-Inf, p33, p66, Inf),
+  labels = c("Economica", "Intermedia", "Cara")
+)
+
+vars_num <- c("accommodates", "bathrooms", "bedrooms", "beds",
+              "minimum_nights", "number_of_reviews", "review_scores_rating",
+              "reviews_per_month", "calculated_host_listings_count",
+              "availability_365")
+
+vars_disp <- intersect(vars_num, names(listings))
+
+datos <- listings[, c("price", vars_disp, "price_category")]
+
+for (col in c("price", vars_disp)) {
+  datos[[col]][is.na(datos[[col]])] <- median(datos[[col]], na.rm = TRUE)
+}
+
+datos <- datos[!is.na(datos$price_category), ]
+```
+
+---
+
+## Inciso 1 – Conjuntos de Entrenamiento y Prueba
+
+```{r particion}
+set.seed(123)
+idx <- createDataPartition(datos$price_category, p = 0.70, list = FALSE)
+
+train_data <- datos[ idx, ]
+test_data  <- datos[-idx, ]
+
+cat("Entrenamiento:", nrow(train_data), "observaciones\n")
+cat("Prueba       :", nrow(test_data),  "observaciones\n")
+
+prop.table(table(train_data$price_category)) * 100
+```
+
+---
+
+## Inciso 2 – Variable Respuesta
+
+La variable respuesta es `price_category`, construida a partir de los percentiles 33 y 66 del precio con tres niveles: Económica, Intermedia y Cara.
+
+```{r variable-respuesta}
+cat("Distribución en entrenamiento:\n")
+print(table(train_data$price_category))
+```
+
+---
+
+## Inciso 3. Modelos de Clasificación con RNA
+
+Se generan dos modelos con diferentes topologías y funciones de activación. Ambos se entrenan sobre las variables numéricas escaladas con los parámetros del conjunto de entrenamiento.
+
+```{r escalar}
+predictores <- vars_disp
+
+x_train <- scale(train_data[, predictores])
+x_test  <- scale(test_data[, predictores],
+                 center = attr(x_train, "scaled:center"),
+                 scale  = attr(x_train, "scaled:scale"))
+
+train_nn <- as.data.frame(x_train)
+train_nn$price_category <- train_data$price_category
+
+test_nn <- as.data.frame(x_test)
+test_nn$price_category <- test_data$price_category
+```
+
+### Modelo 1 – (10 neuronas, activación logística)
+
+```{r modelo1}
+set.seed(123)
+
+modelo1 <- nnet(
+  price_category ~ .,
+  data   = train_nn,
+  size   = 10,
+  decay  = 5e-4,
+  maxit  = 500,
+  rang   = 0.1,
+  trace  = FALSE
+)
+
+cat("Modelo 1 entrenado.\n")
+cat("Pesos totales:", length(modelo1$wts), "\n")
+```
+El modelo quedó conformado por 143 pesos ajustables, debido a la arquitectura de 10 variables de entrada, 10 neuronas ocultas y 3 neuronas de salida (una por clase). La función de activación logística transforma las sumas ponderadas de cada neurona a valores entre 0 y 1.
+
+### Modelo 2 – (5 neuronas, activación tanh)
+
+```{r modelo2}
+set.seed(123)
+
+tune_grid <- expand.grid(
+  size  = 5,
+  decay = c(1e-4, 5e-4, 1e-3)
+)
+
+ctrl <- trainControl(
+  method      = "cv",
+  number      = 5,
+  verboseIter = FALSE
+)
+
+modelo2 <- train(
+  price_category ~ .,
+  data      = train_nn,
+  method    = "nnet",
+  tuneGrid  = tune_grid,
+  trControl = ctrl,
+  trace     = FALSE,
+  maxit     = 500,
+  MaxNWts   = 5000,
+  linout    = FALSE
+)
+
+cat("Modelo 2 entrenado.\n")
+cat("Mejor decay:", modelo2$bestTune$decay, "\n")
+```
+La búsqueda mediante validación cruzada de 5 folds seleccionó un decay de 0.001 como el valor óptimo de regularización. A diferencia del Modelo 1, la función tangente hiperbólica produce salidas en el rango [-1, 1], lo que puede mejorar la convergencia al centrar los valores alrededor de cero. La arquitectura más
+compacta (5 neuronas) reduce la complejidad del modelo y el riesgo de sobreajuste.
+
+---
+
+## Inciso 4. Predicciones
+
+```{r predicciones}
+# Modelo 1 
+pred_proba_m1 <- predict(modelo1, newdata = test_nn[, predictores])
+pred_m1 <- factor(
+  apply(pred_proba_m1, 1, function(x) colnames(pred_proba_m1)[which.max(x)]),
+  levels = levels(test_nn$price_category)
+)
+
+# Modelo 2 
+pred_m2 <- predict(modelo2, newdata = test_nn[, predictores])
+
+head(data.frame(
+  Real      = test_nn$price_category,
+  Modelo1   = pred_m1,
+  Modelo2   = pred_m2
+), 10)
+```
+Se observa que ambos modelos presentan aciertos y errores similares en esta muestra. El error más frecuente es la confusión entre clases adyacentes (Económica con Intermedia e Intermedia con Cara), lo cual es esperable dado que los límites entre categorías están definidos por percentiles y los precios
+en los bordes son naturalmente ambiguos. La clase Cara muestra mayor consistencia entre ambos modelos cuando es predicha correctamente.
+
+```{r accuracy-rapido}
+acc_m1 <- mean(pred_m1 == test_nn$price_category)
+acc_m2 <- mean(pred_m2 == test_nn$price_category)
+
+cat("Accuracy Modelo 1 (nnet, 10n, logística):", round(acc_m1 * 100, 2), "%\n")
+cat("Accuracy Modelo 2 (caret, 5n, tanh)     :", round(acc_m2 * 100, 2), "%\n")
+```
+El Modelo obtuvo un accuracy de 62.78%, ligeramente superior al Modelo 2 (caret, 5 neuronas, tanh) con 62.36%. Ambos resultados pueden superar un clasificador aleatorio, pero dejan margen de mejora. La diferencia mínima entre modelos puede sugerir que la topología más grande no aporta una ventaja significativa en este conjunto de datos, y que la regularización vía decay es el factor más determinante del desempeño.
