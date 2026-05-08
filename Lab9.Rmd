@@ -189,3 +189,224 @@ cat("Accuracy Modelo 1 (nnet, 10n, logística):", round(acc_m1 * 100, 2), "%\n")
 cat("Accuracy Modelo 2 (caret, 5n, tanh)     :", round(acc_m2 * 100, 2), "%\n")
 ```
 El Modelo obtuvo un accuracy de 62.78%, ligeramente superior al Modelo 2 (caret, 5 neuronas, tanh) con 62.36%. Ambos resultados pueden superar un clasificador aleatorio, pero dejan margen de mejora. La diferencia mínima entre modelos puede sugerir que la topología más grande no aporta una ventaja significativa en este conjunto de datos, y que la regularización vía decay es el factor más determinante del desempeño.
+
+## Inciso 5
+```{r}
+## Inciso 5 – Matrices de Confusión
+
+cm_m1 <- confusionMatrix(pred_m1, test_nn$price_category)
+cm_m2 <- confusionMatrix(pred_m2, test_nn$price_category)
+
+cat("=== Modelo 1 (10 neuronas, logística) ===\n")
+print(cm_m1)
+
+cat("\n=== Modelo 2 (5 neuronas, tanh / caret) ===\n")
+print(cm_m2)
+```
+Ambos modelos de redes neuronales superan claramente el clasificador aleatorio (NIR = 33.97%), con el Modelo 1 (10 neuronas, logística) alcanzando un accuracy de 63.04% y Kappa de 0.4455, frente al 62.36% y 0.4353 del Modelo 2 (5 neuronas, tanh), lo que posiciona al Modelo 1 como la opción marginalmente superior. El patrón de errores es consistente en ambos modelos: las clases Económica y Cara se identifican con sensibilidades alrededor del 71%, mientras que la clase Intermedia representa la mayor debilidad con sensibilidades de apenas 46.48% y 45.65% respectivamente, debido a que sus límites definidos por percentiles generan fronteras de decisión naturalmente ambiguas. Los errores más frecuentes ocurren entre clases adyacentes (Intermedia confundida con Económica o Cara), mientras que las confusiones entre extremos, las más costosas operativamente para SmartStay Advisors, pues implicarían recomendar propiedades completamente fuera del presupuesto del cliente, son considerablemente menos frecuentes, lo que sugiere que ambos modelos capturan adecuadamente la estructura general del mercado aunque con limitaciones en el segmento de precio medio.
+
+## Inciso 6
+```{r}
+# Tiempo de procesamiento
+t1 <- system.time({
+  set.seed(123)
+  m1_temp <- nnet(
+    price_category ~ .,
+    data  = train_nn,
+    size  = 10,
+    decay = 5e-4,
+    maxit = 500,
+    rang  = 0.1,
+    trace = FALSE
+  )
+})
+
+t2 <- system.time({
+  set.seed(123)
+  tune_grid2 <- expand.grid(size = 5, decay = c(1e-4, 5e-4, 1e-3))
+  ctrl2 <- trainControl(method = "cv", number = 5, verboseIter = FALSE)
+  m2_temp <- train(
+    price_category ~ .,
+    data      = train_nn,
+    method    = "nnet",
+    tuneGrid  = tune_grid2,
+    trControl = ctrl2,
+    trace     = FALSE,
+    maxit     = 500,
+    MaxNWts   = 5000,
+    linout    = FALSE
+  )
+})
+
+# Métricas por clase
+stats_m1 <- cm_m1$byClass
+stats_m2 <- cm_m2$byClass
+
+cat("=== Efectividad Global ===\n")
+cat("Accuracy Modelo 1:", round(cm_m1$overall["Accuracy"] * 100, 2), "%\n")
+cat("Accuracy Modelo 2:", round(cm_m2$overall["Accuracy"] * 100, 2), "%\n")
+cat("Kappa   Modelo 1:", round(cm_m1$overall["Kappa"], 4), "\n")
+cat("Kappa   Modelo 2:", round(cm_m2$overall["Kappa"], 4), "\n")
+
+cat("\n=== Tiempos de procesamiento ===\n")
+cat("Modelo 1 (elapsed):", t1["elapsed"], "segundos\n")
+cat("Modelo 2 (elapsed):", t2["elapsed"], "segundos\n")
+
+cat("\n=== Sensibilidad por clase – Modelo 1 ===\n")
+print(round(stats_m1[, c("Sensitivity", "Specificity", "F1")], 4))
+
+cat("\n=== Sensibilidad por clase – Modelo 2 ===\n")
+print(round(stats_m2[, c("Sensitivity", "Specificity", "F1")], 4))
+
+# Visualización de matrices de confusión
+library(ggplot2)
+
+plot_cm <- function(cm, titulo) {
+  df <- as.data.frame(cm$table)
+  colnames(df) <- c("Predicho", "Real", "Freq")
+  ggplot(df, aes(x = Real, y = Predicho, fill = Freq)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = Freq), size = 5) +
+    scale_fill_gradient(low = "white", high = "#2166ac") +
+    labs(title = titulo, x = "Valor Real", y = "Predicción") +
+    theme_minimal()
+}
+
+plot_cm(cm_m1, "Matriz de Confusión – Modelo 1 (10n, logística)")
+plot_cm(cm_m2, "Matriz de Confusión – Modelo 2 (5n, tanh)")
+```
+El Modelo 1 (10 neuronas, logística) supera al Modelo 2 (5 neuronas, tanh) en todas las métricas evaluadas; accuracy, Kappa y F1 por clase, aunque la diferencia es marginal (63.04% vs 62.36%), lo que sugiere que la arquitectura más grande no representa una ventaja sustancial en términos predictivos. Sin embargo, la diferencia más relevante entre ambos modelos no es su efectividad sino su tiempo de procesamiento: el Modelo 1 completó el entrenamiento en 83 segundos, mientras que el Modelo 2 requirió más de 511 segundos debido a la validación cruzada de 5 folds utilizada en la búsqueda de hiperparámetros, siendo aproximadamente 6 veces más lento sin ofrecer mejora en el desempeño. En cuanto al patrón de errores, ambos modelos coinciden en que la clase Intermedia concentra las mayores equivocaciones (F1 ≈ 0.48), mientras que Económica y Cara presentan un desempeño más robusto y equilibrado (F1 ≈ 0.69–0.70); esto confirma que la zona de precio medio sigue siendo la frontera de decisión más difícil para las redes neuronales con este conjunto de datos. Considerando la relación entre efectividad y costo computacional, el Modelo 1 es claramente la opción más eficiente.
+
+```{r}
+## Inciso 7 – Análisis de sobreajuste
+
+# Accuracy en entrenamiento vs prueba
+pred_train_m1_proba <- predict(modelo1, newdata = train_nn[, predictores])
+pred_train_m1 <- factor(
+  apply(pred_train_m1_proba, 1, function(x) colnames(pred_train_m1_proba)[which.max(x)]),
+  levels = levels(train_nn$price_category)
+)
+
+pred_train_m2 <- predict(modelo2, newdata = train_nn[, predictores])
+
+acc_train_m1 <- mean(pred_train_m1 == train_nn$price_category)
+acc_train_m2 <- mean(pred_train_m2 == train_nn$price_category)
+
+cat("=== Comparación Train vs Test ===\n")
+cat(sprintf("Modelo 1 | Train: %.2f%%  | Test: %.2f%%  | Diferencia: %.2f%%\n",
+            acc_train_m1 * 100, acc_m1 * 100, (acc_train_m1 - acc_m1) * 100))
+cat(sprintf("Modelo 2 | Train: %.2f%%  | Test: %.2f%%  | Diferencia: %.2f%%\n",
+            acc_train_m2 * 100, acc_m2 * 100, (acc_train_m2 - acc_m2) * 100))
+
+# Curva de aprendizaje manual para Modelo 1
+fracciones <- seq(0.1, 1.0, by = 0.1)
+resultados_curva <- data.frame()
+
+for (f in fracciones) {
+  set.seed(123)
+  idx_sub <- createDataPartition(train_nn$price_category, p = f, list = FALSE)
+  sub_train <- train_nn[idx_sub, ]
+  
+  modelo_tmp <- nnet(
+    price_category ~ .,
+    data  = sub_train,
+    size  = 10,
+    decay = 5e-4,
+    maxit = 500,
+    rang  = 0.1,
+    trace = FALSE
+  )
+  
+  # Train accuracy
+  p_tr_proba <- predict(modelo_tmp, newdata = sub_train[, predictores])
+  p_tr <- factor(
+    apply(p_tr_proba, 1, function(x) colnames(p_tr_proba)[which.max(x)]),
+    levels = levels(train_nn$price_category)
+  )
+  acc_tr <- mean(p_tr == sub_train$price_category)
+  
+  # Test accuracy
+  p_te_proba <- predict(modelo_tmp, newdata = test_nn[, predictores])
+  p_te <- factor(
+    apply(p_te_proba, 1, function(x) colnames(p_te_proba)[which.max(x)]),
+    levels = levels(test_nn$price_category)
+  )
+  acc_te <- mean(p_te == test_nn$price_category)
+  
+  resultados_curva <- rbind(resultados_curva, data.frame(
+    fraccion     = f,
+    n_muestras   = nrow(sub_train),
+    acc_train    = acc_tr,
+    acc_test     = acc_te
+  ))
+}
+
+# Gráfica
+ggplot(resultados_curva, aes(x = n_muestras)) +
+  geom_line(aes(y = acc_train, color = "Entrenamiento"), linewidth = 1) +
+  geom_line(aes(y = acc_test,  color = "Prueba"),        linewidth = 1) +
+  geom_point(aes(y = acc_train, color = "Entrenamiento")) +
+  geom_point(aes(y = acc_test,  color = "Prueba")) +
+  scale_color_manual(values = c("Entrenamiento" = "#d73027", "Prueba" = "#2166ac")) +
+  labs(
+    title  = "Curva de Aprendizaje – Modelo 1 (10 neuronas, logística)",
+    x      = "Número de muestras de entrenamiento",
+    y      = "Accuracy",
+    color  = "Conjunto"
+  ) +
+  theme_minimal()
+
+print(resultados_curva)
+```
+La curva de aprendizaje y la comparación directa entre conjuntos revelan que el Modelo 1 prácticamente no presenta sobreajuste: la diferencia entre accuracy de entrenamiento y prueba es de apenas 0.31%, y el Modelo 2 incluso muestra una diferencia negativa (-0.28%), lo que indica que ambos modelos generalizan correctamente sin memorizar los datos de entrenamiento. En la curva de aprendizaje del Modelo 1 se observa que, a partir de aproximadamente 25,000 muestras, las curvas de entrenamiento y prueba convergen y se estabilizan en torno al 63%, con oscilaciones menores propias del proceso estocástico del entrenamiento pero sin una brecha creciente entre ambas líneas; esto es la firma característica de un modelo bien regularizado. La pequeña separación residual que persiste sugiere que el límite de desempeño no está dado por sobreajuste sino por la complejidad intrínseca del problema, particularmente la ambigüedad en los límites de la clase Intermedia, por lo que agregar más datos probablemente no mejoraría significativamente el accuracy.
+
+## Inciso 8 
+```{r}
+set.seed(123)
+
+tune_grid_final <- expand.grid(
+  size  = c(8, 10, 12),
+  decay = c(1e-3, 5e-3, 1e-2)
+)
+
+ctrl_final <- trainControl(
+  method      = "cv",
+  number      = 3,      
+  verboseIter = TRUE      
+)
+
+modelo_tuned <- train(
+  price_category ~ .,
+  data      = train_nn,
+  method    = "nnet",
+  tuneGrid  = tune_grid_final,
+  trControl = ctrl_final,
+  trace     = FALSE,
+  maxit     = 300,       
+  MaxNWts   = 10000,
+  linout    = FALSE
+)
+
+cat("=== Mejor configuración ===\n")
+print(modelo_tuned$bestTune)
+
+pred_tuned       <- predict(modelo_tuned, newdata = test_nn[, predictores])
+acc_tuned        <- mean(pred_tuned == test_nn$price_category)
+pred_tuned_train <- predict(modelo_tuned, newdata = train_nn[, predictores])
+acc_tuned_train  <- mean(pred_tuned_train == train_nn$price_category)
+
+cat(sprintf("Train: %.2f%%  |  Test: %.2f%%  |  Diferencia: %.2f%%\n",
+            acc_tuned_train * 100, acc_tuned * 100,
+            (acc_tuned_train - acc_tuned) * 100))
+
+cat("\n=== Comparación final ===\n")
+cat(sprintf("Modelo 1 original  | Test: %.2f%%\n", acc_m1 * 100))
+cat(sprintf("Modelo tuneado     | Test: %.2f%%\n", acc_tuned * 100))
+
+ggplot(modelo_tuned$results, aes(x = factor(decay), y = Accuracy,
+                                  color = factor(size), group = factor(size))) +
+  geom_line() + geom_point() +
+  labs(title = "Tuning – Accuracy por configuración",
+       x = "Decay", y = "Accuracy (CV)", color = "Neuronas") +
+  theme_minimal()
+```
