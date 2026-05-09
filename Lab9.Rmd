@@ -410,3 +410,4 @@ ggplot(modelo_tuned$results, aes(x = factor(decay), y = Accuracy,
        x = "Decay", y = "Accuracy (CV)", color = "Neuronas") +
   theme_minimal()
 ```
+El proceso de tuning identificó como configuración óptima 12 neuronas con decay de 0.01, que según la validación cruzada maximiza el accuracy en CV (~62.9%); sin embargo, al evaluar en el conjunto de prueba, el modelo tuneado alcanza apenas un 62.80%, ligeramente inferior al Modelo 1 original (63.04%), lo que indica que el ajuste de hiperparámetros no logró mejorar el desempeño fuera de la muestra. La gráfica de tuning muestra que arquitecturas más grandes (12 neuronas) con mayor regularización (decay alto) tienden a rendir mejor en CV, pero la diferencia entre configuraciones es mínima —menos de 0.8 puntos porcentuales entre la mejor y la peor combinación— lo que sugiere que el modelo ha alcanzado un techo de desempeño para este conjunto de datos con la arquitectura de una sola capa ocult
