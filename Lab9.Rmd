@@ -18,6 +18,7 @@ library(nnet)
 library(caret)
 library(dplyr)
 library(ggplot2)
+library(neuralnet)
 ```
 
 ---
@@ -410,4 +411,208 @@ ggplot(modelo_tuned$results, aes(x = factor(decay), y = Accuracy,
        x = "Decay", y = "Accuracy (CV)", color = "Neuronas") +
   theme_minimal()
 ```
-El proceso de tuning identificó como configuración óptima 12 neuronas con decay de 0.01, que según la validación cruzada maximiza el accuracy en CV (~62.9%); sin embargo, al evaluar en el conjunto de prueba, el modelo tuneado alcanza apenas un 62.80%, ligeramente inferior al Modelo 1 original (63.04%), lo que indica que el ajuste de hiperparámetros no logró mejorar el desempeño fuera de la muestra. La gráfica de tuning muestra que arquitecturas más grandes (12 neuronas) con mayor regularización (decay alto) tienden a rendir mejor en CV, pero la diferencia entre configuraciones es mínima —menos de 0.8 puntos porcentuales entre la mejor y la peor combinación— lo que sugiere que el modelo ha alcanzado un techo de desempeño para este conjunto de datos con la arquitectura de una sola capa ocult
+El proceso de tuning identificó como configuración óptima 12 neuronas con decay de 0.01, que según la validación cruzada maximiza el accuracy en CV (~62.9%); sin embargo, al evaluar en el conjunto de prueba, el modelo tuneado alcanza apenas un 62.80%, ligeramente inferior al Modelo 1 original (63.04%), lo que indica que el ajuste de hiperparámetros no logró mejorar el desempeño fuera de la muestra. La gráfica de tuning muestra que arquitecturas más grandes (12 neuronas) con mayor regularización (decay alto) tienden a rendir mejor en CV, pero la diferencia entre configuraciones es mínima —menos de 0.8 puntos porcentuales entre la mejor y la peor combinación— lo que sugiere que el modelo ha alcanzado un techo de desempeño para este conjunto de datos con la arquitectura de una sola capa oculta
+
+## Inciso 9
+### Nueva variable respuesta
+```{r}
+datos_reg <- datos[, c("price", predictores)]
+
+datos_reg <- na.omit(datos_reg)
+
+set.seed(123)
+
+idx_reg <- createDataPartition(datos_reg$price, p = 0.70, list = FALSE)
+
+train_reg <- datos_reg[idx_reg, ]
+test_reg  <- datos_reg[-idx_reg, ]
+
+cat("Entrenamiento:", nrow(train_reg), "observaciones\n")
+cat("Prueba       :", nrow(test_reg), "observaciones\n")
+
+summary(train_reg$price)
+```
+
+## Inciso 10
+### Modelos de regresión mejorados
+
+```{r}
+# Eliminar outliers extremos del precio usando el percentil 99
+limite_sup <- quantile(datos$price, 0.99, na.rm = TRUE)
+
+datos_reg_mejorado <- datos[datos$price <= limite_sup, ]
+
+# Crear nuevamente train y test
+set.seed(123)
+
+idx_reg <- createDataPartition(datos_reg_mejorado$price, p = 0.70, list = FALSE)
+
+train_reg <- datos_reg_mejorado[idx_reg, ]
+test_reg  <- datos_reg_mejorado[-idx_reg, ]
+
+# Transformar precio para reducir valores extremos
+train_reg$price_log <- log1p(train_reg$price)
+test_reg$price_log  <- log1p(test_reg$price)
+
+# Usar price_log como respuesta
+datos_train_reg <- train_reg[, c("price_log", predictores)]
+datos_test_reg  <- test_reg[, c("price_log", predictores)]
+
+# Escalamiento min-max
+maximos <- apply(datos_train_reg, 2, max)
+minimos <- apply(datos_train_reg, 2, min)
+
+train_reg_scaled <- as.data.frame(
+  scale(datos_train_reg, center = minimos, scale = maximos - minimos)
+)
+
+test_reg_scaled <- as.data.frame(
+  scale(datos_test_reg, center = minimos, scale = maximos - minimos)
+)
+
+# Fórmula
+formula_reg <- as.formula(
+  paste("price_log ~", paste(predictores, collapse = " + "))
+)
+
+# Modelo 1: red ligera con 2 neuronas y activación logística
+set.seed(123)
+
+modelo_reg_1 <- neuralnet(
+  formula_reg,
+  data = train_reg_scaled,
+  hidden = 2,
+  act.fct = "logistic",
+  linear.output = TRUE,
+  stepmax = 1e5,
+  threshold = 0.01
+)
+
+# Modelo 2: red ligera con 1 neurona y activación tanh
+set.seed(123)
+
+modelo_reg_2 <- neuralnet(
+  formula_reg,
+  data = train_reg_scaled,
+  hidden = 1,
+  act.fct = "tanh",
+  linear.output = TRUE,
+  stepmax = 1e5,
+  threshold = 0.1
+)
+
+# Graficar modelos
+plot(modelo_reg_1)
+plot(modelo_reg_2)
+
+# Imprimir resultados
+cat("Modelo 1:\n")
+print(modelo_reg_1$result.matrix)
+
+cat("\nModelo 2:\n")
+print(modelo_reg_2$result.matrix)
+```
+El Modelo 1 obtuvo un error de entrenamiento de 161.58, mientras que el Modelo 2 obtuvo un error de 176.79. Por lo tanto, el Modelo 1 logró un menor error durante el entrenamiento. Sin embargo, el Modelo 1 necesitó 47233 pasos para converger, mientras que el Modelo 2 solo necesitó 1654 pasos. Esto indica que el Modelo 1 fue más preciso en entrenamiento, pero también más costoso computacionalmente. En cambio, el Modelo 2 fue más rápido y simple, aunque con un error ligeramente mayor.
+
+## Inciso 11
+### Comparación de modelos de regresión
+```{r}
+# Predicciones modelo 1
+pred_1 <- compute(
+  modelo_reg_1,
+  test_reg_scaled[, predictores]
+)$net.result
+
+# Predicciones modelo 2
+pred_2 <- compute(
+  modelo_reg_2,
+  test_reg_scaled[, predictores]
+)$net.result
+
+pred_1_log <- pred_1 * 
+  (maximos["price_log"] - minimos["price_log"]) + 
+  minimos["price_log"]
+
+pred_2_log <- pred_2 * 
+  (maximos["price_log"] - minimos["price_log"]) + 
+  minimos["price_log"]
+
+pred_1_real <- expm1(pred_1_log)
+pred_2_real <- expm1(pred_2_log)
+
+real <- test_reg$price
+
+# RMSE
+rmse_1 <- sqrt(mean((real - pred_1_real)^2))
+rmse_2 <- sqrt(mean((real - pred_2_real)^2))
+
+# MAE
+mae_1 <- mean(abs(real - pred_1_real))
+mae_2 <- mean(abs(real - pred_2_real))
+
+cat("Modelo 1\n")
+cat("RMSE:", rmse_1, "\n")
+cat("MAE :", mae_1, "\n\n")
+
+cat("Modelo 2\n")
+cat("RMSE:", rmse_2, "\n")
+cat("MAE :", mae_2, "\n")
+```
+Después de eliminar valores extremos del precio y aplicar la transformación logarítmica, ambos modelos mejoraron considerablemente su desempeño. El Modelo 1 obtuvo un RMSE de 833.35 y un MAE de 188.77, mientras que el Modelo 2 obtuvo un RMSE de 842.62 y un MAE de 194.50. El Modelo 1 fue el que funcionó mejor, ya que presentó menores valores tanto en RMSE como en MAE. Esto indica que sus predicciones estuvieron más cerca de los precios reales en comparación con el Modelo 2. Sin embargo, el Modelo 1 también requirió más pasos para converger, por lo que fue más costoso computacionalmente.
+
+## Inciso 12
+### Análisis de sobreajuste
+```{r}
+# Predicciones entrenamiento modelo 1
+pred_train_1 <- compute(
+  modelo_reg_1,
+  train_reg_scaled[, predictores]
+)$net.result
+
+# Predicciones entrenamiento modelo 2
+pred_train_2 <- compute(
+  modelo_reg_2,
+  train_reg_scaled[, predictores]
+)$net.result
+
+pred_train_1_log <- pred_train_1 *
+  (maximos["price_log"] - minimos["price_log"]) +
+  minimos["price_log"]
+
+pred_train_2_log <- pred_train_2 *
+  (maximos["price_log"] - minimos["price_log"]) +
+  minimos["price_log"]
+
+pred_train_1_real <- expm1(pred_train_1_log)
+pred_train_2_real <- expm1(pred_train_2_log)
+
+real_train <- train_reg$price
+
+# RMSE entrenamiento
+rmse_train_1 <- sqrt(mean((real_train - pred_train_1_real)^2))
+rmse_train_2 <- sqrt(mean((real_train - pred_train_2_real)^2))
+
+learning_curve <- data.frame(
+  Modelo = c("Modelo 1", "Modelo 1", "Modelo 2", "Modelo 2"),
+  Dataset = c("Train", "Test", "Train", "Test"),
+  RMSE = c(
+    rmse_train_1,
+    rmse_1,
+    rmse_train_2,
+    rmse_2
+  )
+)
+
+print(learning_curve)
+
+ggplot(
+  learning_curve,
+  aes(x = Dataset, y = RMSE, group = Modelo, color = Modelo)
+) +
+  geom_line(size = 1.2) +
+  geom_point(size = 3) +
+  ggtitle("Curva de aprendizaje") +
+  theme_minimal()
+```
+La curva de aprendizaje muestra que los errores de entrenamiento y prueba son relativamente similares en ambos modelos. El Modelo 1 obtuvo un RMSE de 738.35 en entrenamiento y 833.35 en prueba, mientras que el Modelo 2 obtuvo un RMSE de 748.79 en entrenamiento y 842.62 en prueba. Debido a que las diferencias entre entrenamiento y prueba no son demasiado grandes, no se observa evidencia de sobreajuste severo. Esto indica que los modelos lograron generalizar adecuadamente sobre datos no vistos y no únicamente memorizaron el conjunto de entrenamiento. Además, el Modelo 1 presentó ligeramente mejores resultados tanto en entrenamiento como en prueba, por lo que puede considerarse el modelo con mejor desempeño general.
+
