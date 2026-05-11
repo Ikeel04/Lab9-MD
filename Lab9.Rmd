@@ -895,3 +895,83 @@ ggplot(
 Random Forest fue el mejor modelo para clasificación, obteniendo el mayor accuracy (0.8593). Esto muestra que los modelos basados en árboles fueron los más efectivos para clasificar el conjunto de datos.
 Para regresión, la RNA obtuvo el menor RMSE (804.87), logrando el mejor desempeño en la predicción del precio de las casas.
 En general, los modelos basados en árboles funcionaron mejor para clasificación, mientras que las redes neuronales fueron más efectivas para regresión.
+
+## Inciso 18
+### Análisis de sobreajuste general
+```{r}
+sobreajuste <- data.frame(
+  Modelo = c(
+    "Naive Bayes",
+    "KNN (k=31)",
+    "Árbol de Decisión",
+    "Random Forest",
+    "Reg. Logística",
+    "SVM Lineal C=0.1",
+    "SVM Lineal C=10",
+    "SVM RBF",
+    "SVM Polinomial",
+    "RNA Clasificación",
+    "RNA Regresión"
+  ),
+
+  Train = c(
+    0.5901,
+    0.6928,
+    0.7201,
+    0.9998,
+    0.6013,
+    0.5969,
+    0.5970,
+    0.6150,
+    0.5369,
+    round(acc_tuned_train, 4),
+    738.3460
+  ),
+
+  Test = c(
+    0.5886,
+    0.6661,
+    0.6896,
+    0.8593,
+    0.6024,
+    0.5972,
+    0.5972,
+    0.6150,
+    0.5367,
+    round(acc_tuned, 4),
+    833.3512
+  )
+)
+
+sobreajuste$Diferencia <- abs(
+  sobreajuste$Train - sobreajuste$Test
+)
+
+sobreajuste$Diferencia_relativa <-
+  sobreajuste$Diferencia / sobreajuste$Train
+
+knitr::kable(
+  sobreajuste,
+  digits = 4,
+  caption = "Análisis de sobreajuste – entrenamiento vs prueba"
+)
+
+ggplot(
+  sobreajuste,
+  aes(
+    x = reorder(Modelo, Diferencia_relativa),
+    y = Diferencia_relativa
+  )
+) +
+  geom_bar(stat = "identity", fill = "firebrick") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Nivel relativo de sobreajuste por modelo",
+    x = "Modelo",
+    y = "Diferencia relativa"
+  )
+```
+Los modelos con menor sobreajuste fueron Naive Bayes, Regresión Logística y SVM, ya que presentaron diferencias muy pequeñas entre entrenamiento y prueba. Sin embargo, su desempeño predictivo fue menor.
+Random Forest presentó el mayor sobreajuste, aunque siguió siendo el mejor modelo para clasificación gracias a su alto accuracy en prueba. La RNA de clasificación mostró poco sobreajuste, mientras que la RNA de regresión presentó una diferencia moderada pero logró el mejor desempeño para predecir el precio de las casas.
+En general, Random Forest fue el mejor modelo para clasificación y la RNA de regresión el mejor para predicción de precios.
