@@ -1,0 +1,516 @@
+---
+title: "Informe_Final"
+author: "Jose Ordoñez, Adrián González, Daniela Ramírez"
+date: "2026-05-11"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    theme: flatly
+    highlight: tango
+    number_sections: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r librerías}
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+```
+
+---
+
+# Resumen Ejecutivo
+
+SmartStay Advisors opera como intermediario entre clientes corporativos y particulares y la
+plataforma Airbnb, con el objetivo de optimizar la selección de propiedades según precio, calidad
+y disponibilidad. Airbnb, a su vez, ofrece incentivos económicos a SmartStay cuando logra
+incrementar la ocupación de propiedades con bajo desempeño. En este contexto, la capacidad de
+estimar precios competitivos, identificar propiedades subvaloradas y comprender los factores que
+determinan la ocupación representa una ventaja competitiva crítica.
+
+Este informe presenta los resultados de una consultoría de minería de datos aplicada al dataset
+público de **listings de Airbnb en Austin, Texas**, que contiene información de más de 76,000
+propiedades. Se desarrollaron y evaluaron siete familias de algoritmos —tanto para predecir el
+precio numérico como para clasificar propiedades en categorías tarifarias— con el objetivo de
+identificar los modelos que mejor capturan la complejidad del mercado.
+
+Los hallazgos principales son los siguientes:
+
+- Para **clasificación de categoría de precio**, el modelo de **Random Forest** es el más preciso,
+  alcanzando un accuracy del **85.93%** y un Kappa de 0.77.
+- Para **predicción del precio numérico**, la **Red Neuronal Artificial** obtuvo el menor RMSE
+  (**804.87**), superando a todos los modelos previos.
+- La variable `accommodates` (capacidad de alojamiento) es el factor más determinante del precio
+  en la mayoría de los modelos evaluados.
+- Los modelos basados en ensambles (Random Forest) y redes neuronales demostraron mayor
+  capacidad de generalización que los modelos lineales.
+
+---
+
+# Contexto del Negocio y Objetivos
+
+SmartStay Advisors requería una solución analítica que le permitiera:
+
+1. **Estimar precios competitivos** para orientar sus recomendaciones a clientes.
+2. **Identificar propiedades con baja ocupación** que sean candidatas a los incentivos de Airbnb.
+3. **Comprender qué factores influyen** en la ocupación y los ingresos de las propiedades.
+4. **Diseñar estrategias basadas en datos** para aumentar la rentabilidad de su cartera.
+
+Para abordar estos objetivos, se estructuró la consultoría en dos líneas de modelado: una de
+**regresión** para estimar el precio numérico por noche, y una de **clasificación** para categorizar
+propiedades en económicas, intermedias o caras. Ambas líneas se evaluaron bajo las mismas
+condiciones de partición de datos, garantizando comparaciones válidas entre algoritmos.
+
+---
+
+# Descripción del Conjunto de Datos y Análisis Exploratorio
+
+## Estructura de los Datos
+
+El dataset `listings.RData` contiene información scrapeada de Airbnb en septiembre de 2025.
+Incluye variables descriptivas del alojamiento (tipo de habitación, capacidad, número de
+habitaciones, baños y camas), variables de desempeño del anfitrión (tasa de respuesta,
+aceptación, número de listados), métricas de reseñas y variables de disponibilidad y precio.
+
+La variable objetivo principal —el precio por noche— se encontraba en formato de cadena de texto
+con símbolo de moneda, por lo que requirió transformación a numérico. Tras la limpieza inicial,
+el dataset presentó la siguiente estructura de valores faltantes en las variables clave:
+
+```{r tabla-nas, echo=FALSE}
+nas <- data.frame(
+  Variable      = c("bedrooms", "beds", "bathrooms", "review_scores_rating",
+                    "reviews_per_month", "host_response_rate", "host_acceptance_rate"),
+  Estrategia    = c("Mediana", "Mediana", "Mediana", "Cero (sin reseñas)",
+                    "Cero (sin reseñas)", "Mediana", "Mediana")
+)
+kable(nas, caption = "Estrategia de imputación por variable") %>%
+  kable_styling(bootstrap_options = c("striped","hover"), full_width = FALSE)
+```
+
+## Distribución del Precio
+
+El precio por noche presentó una distribución fuertemente asimétrica hacia la derecha, con una
+mediana considerablemente inferior a la media. La presencia de valores extremos (propiedades
+de lujo con precios superiores a \$10,000 por noche) evidenció que la distribución del precio no
+sigue una ley normal, lo cual tiene implicaciones directas en la elección y evaluación de modelos.
+
+El análisis de percentiles reveló los siguientes umbrales naturales para definir las categorías de precio:
+
+```{r tabla-categorias, echo=FALSE}
+cats <- data.frame(
+  Categoría  = c("Económica", "Intermedia", "Cara"),
+  Umbral     = c("≤ Percentil 33", "Percentil 33 – Percentil 66", "> Percentil 66"),
+  Descripción = c("Propiedades de bajo costo, accesibles para la mayoría de clientes",
+                  "Propiedades de precio moderado, segmento más amplio del mercado",
+                  "Propiedades premium o de lujo")
+)
+kable(cats, caption = "Definición de categorías tarifarias") %>%
+  kable_styling(bootstrap_options = c("striped","hover"), full_width = FALSE)
+```
+
+La variable `price_category` quedó distribuida de forma aproximadamente equilibrada: un 33%
+de propiedades económicas, 50% intermedias y 25% caras, lo que representa un problema de
+clasificación multiclase con leve desbalance hacia la categoría intermedia.
+
+## Variables con Mayor Poder Predictivo
+
+A través del análisis exploratorio y de importancia de variables (Random Forest), se identificaron
+las siguientes variables como las más influyentes en la determinación del precio:
+
+- **`accommodates`**: capacidad máxima de huéspedes. Variable con mayor correlación positiva
+  con el precio en todos los modelos evaluados.
+- **`bedrooms`** y **`bathrooms`**: número de habitaciones y baños, estrechamente relacionados con
+  la capacidad y el segmento de mercado.
+- **`room_type`**: el tipo de alojamiento (habitación privada vs. propiedad completa) es uno de
+  los factores más determinantes del precio.
+- **`estimated_revenue_l365d`**: ingresos estimados del anfitrión, reflejo del historial de ocupación.
+- **`availability_365`** y **`calculated_host_listings_count`**: indicadores de la escala de operación
+  del anfitrión y su nivel de profesionalismo.
+- **Métricas de reseñas**: `review_scores_rating`, `reviews_per_month` y subescalas de limpieza
+  y ubicación contribuyen como señales de calidad percibida.
+
+La correlación entre variables numéricas reveló multicolinealidad moderada entre `accommodates`,
+`bedrooms`, `beds` y `bathrooms`, lo cual fue considerado en la selección de modelos (en
+particular para los que asumen independencia entre predictores, como Naive Bayes).
+
+## Partición de Datos
+
+Para garantizar comparaciones válidas entre todos los algoritmos evaluados, se estableció una
+única partición estratificada aplicada de forma consistente a lo largo de toda la consultoría:
+
+- **Entrenamiento:** 70% de los datos (~53,372 observaciones)
+- **Prueba:** 30% de los datos (~22,874 observaciones)
+- **Semilla:** `set.seed(123)` con `createDataPartition` por `price_category`
+
+---
+
+# Modelado Predictivo del Precio (Regresión)
+
+## Regresión Lineal como Línea Base
+
+Como punto de partida, se exploraron modelos de regresión lineal en sus variantes simple,
+múltiple y con regularización (Ridge y Lasso). El modelo de **regresión lineal múltiple** sobre
+todas las variables numéricas disponibles obtuvo el mejor resultado dentro de esta familia, con
+un **RMSE de 3,011.84**, lo cual sirvió como referencia para comparar modelos más complejos.
+
+Los modelos con regularización (Ridge: RMSE = 3,304; Lasso: RMSE = 3,023) no superaron al
+modelo múltiple sin penalización, confirmando que la multicolinealidad no era lo suficientemente
+severa como para degradar significativamente las estimaciones lineales. El modelo simple (RMSE
+= 4,226) confirmó que una única variable predictora es insuficiente para capturar la complejidad
+del precio en este mercado.
+
+Una limitación fundamental de los modelos lineales en este contexto es su incapacidad para
+capturar relaciones no lineales y la alta varianza del precio en los rangos extremos, factores que
+los modelos basados en árboles y redes neuronales lograron superar con mayor éxito.
+
+## Árboles de Regresión
+
+Los árboles de regresión demostraron una mejora sustancial respecto a los modelos lineales.
+El árbol sin restricciones de profundidad obtuvo un RMSE de 1,939.52, y al explorar distintas
+profundidades máximas, el mejor resultado se obtuvo en **profundidad 10** con un **RMSE de
+2,044.19 y R² de 0.77**. Si bien este resultado supera claramente a la regresión lineal, el árbol
+individual mostró cierta sensibilidad a la profundidad, con riesgo de sobreajuste en configuraciones
+muy profundas.
+
+## Random Forest para Regresión
+
+El modelo de **Random Forest** para regresión con 100 árboles y `mtry = floor(sqrt(p))` obtuvo
+un **RMSE de 1,337.63 y un R² de 0.9089**, lo que representa la mayor capacidad explicativa
+registrada hasta ese punto. Este resultado confirma que los ensambles de árboles capturan
+relaciones no lineales y efectos de interacción entre variables que los modelos individuales no
+logran modelar adecuadamente.
+
+El análisis de importancia de variables del Random Forest confirmó que `room_type`,
+`estimated_revenue_l365d`, `beds`, `host_total_listings_count` y `availability_365` son los
+predictores más influyentes para estimar el precio numérico.
+
+## Naive Bayes para Regresión
+
+El algoritmo de Naive Bayes fue evaluado también en tarea de regresión. Con `laplace = 0` obtuvo
+un RMSE de 1,761.22, sin embargo su R² fue de apenas 0.055, indicando que el modelo explica
+menos del 6% de la variabilidad del precio. Esta discrepancia se explica porque el RMSE de Naive
+Bayes fue calculado sobre una submuestra distinta al resto de modelos, por lo que **no es
+directamente comparable** y su desempeño real es significativamente inferior. El supuesto de
+independencia condicional del algoritmo lo hace fundamentalmente inadecuado para predecir
+una variable continua con alta correlación entre predictores.
+
+## K-Nearest Neighbors para Regresión
+
+El modelo KNN tuneado con **k = 5** (seleccionado mediante validación cruzada 10-fold en tres
+repeticiones) obtuvo un **RMSE de 3,005.69 y R² de 0.5141**, superando al KNN base con
+k = 231 que presentaba un RMSE de 3,742.26. La búsqueda de hiperparámetros demostró una
+tendencia clara: valores pequeños de k reducen el error al precio de mayor sensibilidad al ruido,
+mientras que valores grandes suavizan excesivamente las predicciones. En este conjunto de
+datos, el valor óptimo fue el mínimo evaluado (k = 5), lo que sugiere que la señal local en el
+espacio de features es informativa.
+
+## Máquinas de Vectores de Soporte para Regresión (SVR)
+
+El SVR con kernel radial (RBF), costo C = 10 y γ = 0.1 obtuvo un **RMSE de 3,559.82 y R² de
+0.2348**, quedando como el modelo de regresión con menor capacidad explicativa entre los
+algoritmos comparables. La distribución altamente asimétrica y con valores extremos del precio
+dificulta que el SVM encuentre una función de regresión estable, ya que el margen de tolerancia
+ε de la SVR no logra adaptarse bien a la alta varianza presente en los datos.
+
+## Redes Neuronales Artificiales para Regresión
+
+Se evaluaron dos arquitecturas de RNA para regresión:
+
+- **Modelo 1:** Red con una capa oculta de 8 neuronas y activación logística.
+- **Modelo 2:** Red con una capa oculta de 5 neuronas y activación tanh, entrenada con
+  validación cruzada de 5 folds para seleccionar el decay óptimo.
+
+Tras el ajuste de hiperparámetros, la **RNA tuneada obtuvo el mejor RMSE de todos los modelos
+evaluados: 804.87**, superando incluso al Random Forest. Este resultado posiciona a las redes
+neuronales como la herramienta más precisa para estimar precios numéricos en este contexto,
+aunque a costa de mayor complejidad computacional y menor interpretabilidad.
+
+## Comparación Global de Modelos de Regresión
+
+```{r tabla-regresion}
+reg <- data.frame(
+  Modelo = c("Regresión Lineal Múltiple", "Árbol de Regresión (prof. 10)",
+             "Random Forest Regresión", "KNN (k=5, tuneado)",
+             "SVR (RBF, C=10, γ=0.1)", "RNA (tuneada)"),
+  RMSE   = c(3011.84, 2044.19, 1337.63, 3005.69, 3559.82, 804.87),
+  R2     = c(0.497, 0.772, 0.909, 0.514, 0.235, NA),
+  Nota   = c("Línea base", "Mejor árbol individual", "Mejor ensamble",
+             "K óptimo = 5", "Espacio de búsqueda limitado",
+             "Mejor modelo global")
+)
+
+kable(reg, digits = 2,
+      col.names = c("Modelo", "RMSE", "R²", "Observación"),
+      caption = "Comparación de modelos de regresión – conjunto de prueba") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(6, bold = TRUE, color = "white", background = "#27ae60") %>%
+  row_spec(5, bold = TRUE, color = "white", background = "#e74c3c")
+```
+
+```{r grafico-regresion}
+reg_plot <- reg[reg$Modelo != "SVR (RBF, C=10, γ=0.1)", ]
+
+ggplot(reg_plot, aes(x = reorder(Modelo, RMSE), y = RMSE, fill = RMSE)) +
+  geom_col(width = 0.65) +
+  geom_text(aes(label = round(RMSE, 0)), hjust = -0.15, size = 3.5) +
+  coord_flip() +
+  scale_fill_gradient(low = "#27ae60", high = "#e74c3c") +
+  labs(title = "RMSE por modelo de regresión",
+       subtitle = "Menor RMSE = mejor desempeño",
+       x = "", y = "RMSE") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none") +
+  ylim(0, 3700)
+```
+
+---
+
+# Modelado de Clasificación de Categoría de Precio
+
+## Árboles de Decisión
+
+El árbol de clasificación con profundidad máxima de 6 obtuvo el mejor balance entre complejidad
+e interpretabilidad dentro de esta familia, alcanzando un **accuracy de 68.96%**. La profundidad
+óptima fue identificada mediante exploración de distintos valores, donde profundidades mayores
+a 6 no aportaron mejoras adicionales. La validación cruzada de 10 folds confirmó un accuracy
+de 67.92% con el parámetro de complejidad óptimo (cp = 0.012), lo que indica una buena
+capacidad de generalización.
+
+La variable más importante en la primera división del árbol fue `accommodates`, seguida de
+`estimated_revenue_l365d` y `bathrooms`, consistente con el análisis exploratorio.
+
+## Random Forest para Clasificación
+
+El **Random Forest con 100 árboles** es el modelo de clasificación con mayor desempeño de toda
+la consultoría, alcanzando un **accuracy de 85.93% y Kappa de 0.7714**, lo que indica una
+concordancia sustancial con las categorías reales. Este resultado supera en más de 17 puntos
+porcentuales al segundo mejor modelo (Árbol de Decisión, 68.96%).
+
+El precio del alto accuracy es un nivel elevado de sobreajuste: el accuracy en entrenamiento fue
+de 99.98%, lo que representa una diferencia de 14 puntos respecto al conjunto de prueba.
+Sin embargo, dado que el accuracy en prueba sigue siendo el más alto, y que el dataset es
+suficientemente grande para que la muestra de prueba sea representativa, este sobreajuste es
+aceptable desde una perspectiva práctica.
+
+## Naive Bayes para Clasificación
+
+El modelo Naive Bayes alcanzó un **accuracy de 58.86% y Kappa de 0.3549**, el más bajo entre
+todos los clasificadores evaluados. Su limitación principal es el supuesto de independencia
+condicional entre variables: dado que `accommodates`, `bedrooms`, `beds` y `bathrooms` están
+fuertemente correlacionadas, este supuesto es violado y el modelo no logra capturar la
+estructura real de los datos. A favor de Naive Bayes está su tiempo de entrenamiento
+excepcional (0.055 segundos), lo que lo hace útil en escenarios de predicción en tiempo real
+con recursos computacionales limitados.
+
+## K-Nearest Neighbors para Clasificación
+
+El KNN tuneado con **k = 31** obtuvo un **accuracy de 66.61% y Kappa de 0.4414**, representando
+una mejora de 5 puntos porcentuales respecto al KNN base (k = 5, accuracy = 65.41%). La
+selección del k óptimo mediante validación cruzada demostró que valores intermedios ofrecen
+el mejor balance para este conjunto de datos. KNN no requiere entrenamiento explícito, pero su
+tiempo de predicción crece con el tamaño del conjunto de datos, lo que representa una limitación
+en producción.
+
+## Regresión Logística Multinomial
+
+La regresión logística multinomial con umbral de regularización `decay = 0.01` alcanzó un
+**accuracy de 60.75% y Kappa de 0.4113**. La clase con mayor dificultad de clasificación fue
+"Intermedia", con una sensibilidad de apenas 43.24% y F1 de 0.4622. Esto refleja la limitación
+estructural de los modelos lineales para separar categorías cuyos límites son inherentemente
+difusos. Su ventaja competitiva es la **interpretabilidad**: los coeficientes del modelo permiten
+explicar directamente al equipo comercial de SmartStay por qué una propiedad es clasificada
+como cara, citando variables específicas y su dirección de efecto.
+
+## Máquinas de Vectores de Soporte para Clasificación
+
+Se evaluaron cuatro configuraciones de SVM: lineal con C = 0.1 y C = 10, kernel RBF y kernel
+polinomial. El **SVM con kernel RBF** fue el más preciso de esta familia, con un **accuracy de
+61.50%**. Los modelos lineales (accuracy ≈ 59.7%) no superaron a Naive Bayes en términos de
+accuracy, aunque presentaron el menor nivel de sobreajuste de toda la consultoría (diferencia
+train-test < 0.03%), lo que los convierte en los modelos más estables. El SVM polinomial
+mostró el accuracy más bajo (53.67%), confirmando que esta función kernel no es adecuada para
+la estructura de este conjunto de datos.
+
+## Redes Neuronales Artificiales para Clasificación
+
+Se evaluaron dos arquitecturas:
+
+- **Modelo 1:** `nnet`, 10 neuronas en una capa oculta, activación **logística** (sigmoide),
+  decay = 5e-4. **Accuracy en prueba: 62.78%.**
+- **Modelo 2:** `nnet` vía `caret`, 5 neuronas en una capa oculta, activación **tanh**,
+  decay óptimo seleccionado por validación cruzada de 5 folds (decay = 0.001).
+  **Accuracy en prueba: 62.36%.**
+
+Tras el tuneo de hiperparámetros (grid search sobre `size` × `decay`), la **RNA tuneada
+alcanzó un accuracy de 62.53%**, con una diferencia train-test de apenas 0.49%, confirmando
+ausencia de sobreajuste significativo. Este resultado posiciona a las RNA en un nivel intermedio:
+superan a Naive Bayes, regresión logística y SVM, pero no alcanzan al KNN, árbol de decisión
+ni Random Forest.
+
+El error más frecuente en ambos modelos fue la confusión entre clases adyacentes
+(Económica ↔ Intermedia e Intermedia ↔ Cara), consistente con lo observado en todos los
+demás clasificadores: las fronteras definidas por percentiles no son inherentemente separables
+con las variables físicas disponibles.
+
+## Comparación Global de Modelos de Clasificación
+
+```{r tabla-clasificacion}
+cls <- data.frame(
+  Modelo    = c("Naive Bayes", "Regresión Logística", "SVM RBF",
+                "RNA (tuneada)", "KNN (k=31)", "Árbol de Decisión",
+                "Random Forest"),
+  Accuracy  = c(0.5886, 0.6075, 0.6150, 0.6253, 0.6661, 0.6896, 0.8593),
+  Kappa     = c(0.3549, 0.4113, NA, NA, 0.4414, NA, 0.7714),
+  Sobreajuste = c("Mínimo", "Mínimo", "Nulo", "Mínimo",
+                  "Bajo", "Bajo", "Elevado"),
+  Velocidad = c("Muy rápido", "Rápido", "Moderado", "Lento",
+                "Lento en predicción", "Rápido", "Moderado")
+)
+
+kable(cls, digits = 4,
+      col.names = c("Modelo", "Accuracy", "Kappa", "Sobreajuste", "Velocidad"),
+      caption = "Comparación de modelos de clasificación – conjunto de prueba") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  row_spec(7, bold = TRUE, color = "white", background = "#27ae60") %>%
+  row_spec(1, bold = TRUE, color = "white", background = "#e74c3c")
+```
+
+```{r grafico-clasificacion}
+ggplot(cls, aes(x = reorder(Modelo, Accuracy), y = Accuracy, fill = Accuracy)) +
+  geom_col(width = 0.65) +
+  geom_text(aes(label = scales::percent(Accuracy, accuracy = 0.01)),
+            hjust = -0.15, size = 3.5) +
+  coord_flip() +
+  scale_fill_gradient(low = "#e74c3c", high = "#27ae60") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1.05)) +
+  labs(title = "Accuracy por modelo de clasificación",
+       subtitle = "Variable respuesta: Económica / Intermedia / Cara",
+       x = "", y = "Accuracy") +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+```
+
+---
+
+# Análisis de Sobreajuste
+
+Un factor determinante para seleccionar el modelo óptimo en producción es el nivel de sobreajuste.
+Un modelo que memoriza el conjunto de entrenamiento sin generalizar a datos nuevos no es útil
+para SmartStay, independientemente de su accuracy en entrenamiento.
+
+```{r tabla-sobreajuste}
+soa <- data.frame(
+  Modelo = c("SVM Lineal", "SVM RBF", "SVM Polinomial", "Naive Bayes",
+             "Reg. Logística", "RNA Clasificación", "KNN (k=31)",
+             "Árbol de Decisión", "RNA Regresión", "Random Forest"),
+  Train  = c(0.5970, 0.6150, 0.5369, 0.5901, 0.6013, 0.6302,
+             0.6928, 0.7201, 738.35, 0.9998),
+  Test   = c(0.5972, 0.6150, 0.5367, 0.5886, 0.6024, 0.6253,
+             0.6661, 0.6896, 833.35, 0.8593),
+  Dif_rel = c("0.03%", "0.00%", "0.04%", "0.25%", "0.18%",
+              "0.78%", "3.85%", "4.24%", "12.87%", "14.05%")
+)
+
+kable(soa,
+      col.names = c("Modelo", "Métrica Train", "Métrica Test", "Diferencia Relativa"),
+      caption = "Análisis de sobreajuste – clasificación (Accuracy) y regresión RNA (RMSE)") %>%
+  kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                full_width = FALSE) %>%
+  footnote(general = "Para Random Forest y clasificadores: Accuracy. Para RNA Regresión: RMSE (menor = mejor, diferencia invierte interpretación).")
+```
+
+Los modelos SVM, Naive Bayes y Regresión Logística presentaron el sobreajuste más bajo, con
+diferencias relativas inferiores al 0.25%. Esto los convierte en los modelos más estables, aunque
+su desempeño predictivo sea menor. En el otro extremo, **Random Forest** muestra el sobreajuste
+más alto para clasificación (14.05%), pero su accuracy en prueba sigue siendo el más elevado
+por un amplio margen, lo que lo hace preferible desde una perspectiva práctica.
+
+La **RNA de regresión** presenta un nivel de sobreajuste moderado (12.87%) que, combinado con
+su RMSE de 804.87 en prueba, confirma que el modelo generaliza bien a pesar de la diferencia
+observada entre entrenamiento y prueba.
+
+---
+
+# Recomendaciones Estratégicas para SmartStay Advisors
+
+## Modelo Recomendado para Clasificación
+
+Se recomienda implementar **Random Forest** como modelo de clasificación de categoría de
+precio en producción, dado su accuracy del 85.93% y Kappa de 0.77. Este modelo permite a
+SmartStay categorizar rápidamente cualquier propiedad nueva o existente en económica,
+intermedia o cara, facilitando la alineación entre las expectativas del cliente y la oferta disponible.
+
+Para escenarios donde la **interpretabilidad** sea prioritaria (por ejemplo, explicar a un cliente
+por qué una propiedad fue clasificada en determinada categoría), la **Regresión Logística
+Multinomial** ofrece un balance razonable (accuracy = 60.75%) con coeficientes completamente
+interpretables y sin requerimientos de tuneo complejo.
+
+## Modelo Recomendado para Estimación de Precio
+
+Se recomienda implementar la **Red Neuronal Artificial tuneada** (RMSE = 804.87) para la
+estimación numérica del precio. Este modelo captura las relaciones no lineales y las interacciones
+entre variables físicas del alojamiento mejor que cualquier otro algoritmo evaluado.
+
+Como alternativa más interpretable, el **Árbol de Regresión con profundidad 10** (RMSE =
+2,044, R² = 0.77) ofrece un desempeño robusto y permite visualizar las reglas de decisión que
+determinan el precio estimado, lo que puede ser valioso para el equipo comercial.
+
+## Factores Clave para Optimización de Precio
+
+Los análisis de importancia de variables coinciden en señalar los siguientes factores como los
+más determinantes del precio:
+
+- **Capacidad de alojamiento (`accommodates`)**: el factor aislado con mayor poder predictivo.
+  Propiedades que puedan recibir más huéspedes tienen precios sistemáticamente más altos.
+- **Tipo de habitación (`room_type`)**: las propiedades completas alcanzan precios
+  significativamente más altos que las habitaciones privadas o compartidas.
+- **Historial de ocupación e ingresos**: el revenue estimado a 365 días refleja el éxito
+  comercial del anfitrión, y está correlacionado con el precio que el mercado está dispuesto
+  a pagar.
+- **Número de baños**: diferenciador clave en el segmento intermedio-caro, donde este factor
+  separa propiedades que de otro modo serían difíciles de categorizar.
+
+---
+
+# Conclusiones
+
+Esta consultoría demostró que el mercado de Airbnb en Austin presenta una estructura de
+precios compleja, no lineal y con alta dispersión, lo que hace que los modelos más simples
+—como la regresión lineal o Naive Bayes— sean insuficientes para capturar su dinámica.
+
+Para la tarea de **clasificación**, los modelos basados en árboles (especialmente Random Forest)
+superaron consistentemente a los modelos lineales y probabilísticos, gracias a su capacidad de
+capturar interacciones entre variables y relaciones no lineales. Las redes neuronales ocuparon
+una posición intermedia, superando a los modelos más simples pero sin alcanzar el nivel del
+ensamble de árboles.
+
+Para la tarea de **regresión**, la jerarquía fue distinta: las redes neuronales tuneadas lograron
+el menor error de predicción, seguidas por Random Forest y el árbol individual. Los modelos
+lineales y el SVM, aunque más interpretables, mostraron limitaciones evidentes ante la
+distribución asimétrica del precio.
+
+El **nivel de sobreajuste** no eliminó a ningún modelo de la consideración final, ya que incluso
+los modelos con mayor diferencia train-test (Random Forest y RNA Regresión) lograron los
+mejores resultados en el conjunto de prueba. No obstante, en contextos donde el dataset de
+producción pueda diferir significativamente del de entrenamiento, los modelos más estables
+(SVM, Regresión Logística) ofrecen garantías adicionales de robustez.
+
+En definitiva, SmartStay Advisors cuenta ahora con una arquitectura analítica clara: **Random
+Forest para clasificar propiedades** y **Redes Neuronales para estimar precios**, respaldada por
+evidencia empírica sólida sobre un conjunto de datos de más de 76,000 listados reales.
+
+---
+
+*Informe preparado por Jose Ordoñez, Adrián González y Daniela Ramírez*  
+*CC3074 – Minería de Datos | Universidad del Valle de Guatemala | Semestre I 2026*
