@@ -437,12 +437,10 @@ summary(train_reg$price)
 ### Modelos de regresión mejorados
 
 ```{r}
-# Eliminar outliers extremos del precio usando el percentil 99
 limite_sup <- quantile(datos$price, 0.99, na.rm = TRUE)
 
 datos_reg_mejorado <- datos[datos$price <= limite_sup, ]
 
-# Crear nuevamente train y test
 set.seed(123)
 
 idx_reg <- createDataPartition(datos_reg_mejorado$price, p = 0.70, list = FALSE)
@@ -450,15 +448,12 @@ idx_reg <- createDataPartition(datos_reg_mejorado$price, p = 0.70, list = FALSE)
 train_reg <- datos_reg_mejorado[idx_reg, ]
 test_reg  <- datos_reg_mejorado[-idx_reg, ]
 
-# Transformar precio para reducir valores extremos
 train_reg$price_log <- log1p(train_reg$price)
 test_reg$price_log  <- log1p(test_reg$price)
 
-# Usar price_log como respuesta
 datos_train_reg <- train_reg[, c("price_log", predictores)]
 datos_test_reg  <- test_reg[, c("price_log", predictores)]
 
-# Escalamiento min-max
 maximos <- apply(datos_train_reg, 2, max)
 minimos <- apply(datos_train_reg, 2, min)
 
@@ -470,7 +465,6 @@ test_reg_scaled <- as.data.frame(
   scale(datos_test_reg, center = minimos, scale = maximos - minimos)
 )
 
-# Fórmula
 formula_reg <- as.formula(
   paste("price_log ~", paste(predictores, collapse = " + "))
 )
@@ -501,11 +495,9 @@ modelo_reg_2 <- neuralnet(
   threshold = 0.1
 )
 
-# Graficar modelos
 plot(modelo_reg_1)
 plot(modelo_reg_2)
 
-# Imprimir resultados
 cat("Modelo 1:\n")
 print(modelo_reg_1$result.matrix)
 
@@ -615,4 +607,112 @@ ggplot(
   theme_minimal()
 ```
 La curva de aprendizaje muestra que los errores de entrenamiento y prueba son relativamente similares en ambos modelos. El Modelo 1 obtuvo un RMSE de 738.35 en entrenamiento y 833.35 en prueba, mientras que el Modelo 2 obtuvo un RMSE de 748.79 en entrenamiento y 842.62 en prueba. Debido a que las diferencias entre entrenamiento y prueba no son demasiado grandes, no se observa evidencia de sobreajuste severo. Esto indica que los modelos lograron generalizar adecuadamente sobre datos no vistos y no únicamente memorizaron el conjunto de entrenamiento. Además, el Modelo 1 presentó ligeramente mejores resultados tanto en entrenamiento como en prueba, por lo que puede considerarse el modelo con mejor desempeño general.
+
+## Inciso 13
+### Tuneo de parametros
+```{r}
+configuraciones <- c(1, 2, 3)
+
+resultados_tuning <- data.frame()
+
+for (h in configuraciones) {
+
+  set.seed(123)
+
+  modelo_temp <- neuralnet(
+    formula_reg,
+    data = train_reg_scaled,
+    hidden = h,
+    act.fct = "logistic",
+    linear.output = TRUE,
+    stepmax = 1e5,
+    threshold = 0.01
+  )
+
+  pred_temp <- compute(
+    modelo_temp,
+    test_reg_scaled[, predictores]
+  )$net.result
+
+  pred_temp_log <- pred_temp *
+    (maximos["price_log"] - minimos["price_log"]) +
+    minimos["price_log"]
+
+  pred_temp_real <- expm1(pred_temp_log)
+
+  # RMSE
+  rmse_temp <- sqrt(mean((test_reg$price - pred_temp_real)^2))
+
+  resultados_tuning <- rbind(
+    resultados_tuning,
+    data.frame(
+      Neuronas = h,
+      RMSE = rmse_temp
+    )
+  )
+}
+
+print(resultados_tuning)
+```
+Se realizó un ajuste del número de neuronas ocultas del modelo de regresión utilizando configuraciones de 1, 2 y 3 neuronas en la capa oculta. Se observa que al incrementar ligeramente el número de neuronas ocultas, el error RMSE disminuye progresivamente. Esto indica que el modelo mejora su capacidad predictiva al utilizar una arquitectura un poco más compleja. La mejor configuración fue la red con 3 neuronas ocultas, ya que obtuvo el menor RMSE. Sin embargo, el incremento de complejidad fue moderado, por lo que no se evidencia un sobreajuste importante. Además, el modelo continúa manteniendo una diferencia razonable entre el error de entrenamiento y prueba.
+
+## Inciso 14
+### Comparación de modelos
+```{r}
+comparacion_final <- data.frame(
+  Modelo = c(
+    "Naive Bayes",
+    "SVM RBF",
+    "Regresión Logística",
+    "KNN",
+    "Árbol de Decisión",
+    "Random Forest",
+    "RNA Regresión"
+  ),
+
+  Tipo = c(
+    "Clasificación",
+    "Clasificación",
+    "Clasificación",
+    "Clasificación",
+    "Clasificación",
+    "Clasificación",
+    "Regresión"
+  ),
+
+  Metrica = c(
+    0.5886,
+    0.6150,
+    0.6024,
+    0.6661,
+    0.6896,
+    0.8593,
+    804.8734
+  )
+)
+
+knitr::kable(
+  comparacion_final,
+  col.names = c("Modelo", "Tipo", "Métrica principal"),
+  caption = "Comparación general de modelos"
+)
+
+ggplot(
+  comparacion_final,
+  aes(x = Modelo, y = Metrica, fill = Tipo)
+) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(
+    title = "Comparación general de modelos",
+    x = "Modelo",
+    y = "Métrica principal"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 20, hjust = 1)
+  )
+```
+Se realizó una comparación general entre los distintos modelos desarrollados a lo largo de los laboratorios. Para los problemas de clasificación se utilizaron métricas de accuracy, mientras que para el problema de regresión con redes neuronales se utilizó RMSE.
+En clasificación, el modelo con mejor desempeño fue Random Forest, alcanzando un accuracy aproximado de 0.86, lo que indica una alta capacidad para clasificar correctamente las categorías del dataset. Otros modelos como Árboles de Decisión y KNN también mostraron resultados razonables, mientras que Naive Bayes presentó el menor desempeño, aunque con un tiempo de entrenamiento muy bajo. Para regresión, la red neuronal artificial permitió predecir directamente el precio de las casas. Después de aplicar preprocesamiento, transformación logarítmica y tuning de parámetros, el mejor modelo RNA alcanzó un RMSE de aproximadamente 804.87 y un MAE de 188.77.
+
 
