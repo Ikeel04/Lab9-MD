@@ -19,6 +19,10 @@ library(caret)
 library(dplyr)
 library(ggplot2)
 library(neuralnet)
+library(e1071)
+library(class)
+library(rpart)
+library(randomForest)
 ```
 
 ---
@@ -715,4 +719,98 @@ ggplot(
 Se realizó una comparación general entre los distintos modelos desarrollados a lo largo de los laboratorios. Para los problemas de clasificación se utilizaron métricas de accuracy, mientras que para el problema de regresión con redes neuronales se utilizó RMSE.
 En clasificación, el modelo con mejor desempeño fue Random Forest, alcanzando un accuracy aproximado de 0.86, lo que indica una alta capacidad para clasificar correctamente las categorías del dataset. Otros modelos como Árboles de Decisión y KNN también mostraron resultados razonables, mientras que Naive Bayes presentó el menor desempeño, aunque con un tiempo de entrenamiento muy bajo. Para regresión, la red neuronal artificial permitió predecir directamente el precio de las casas. Después de aplicar preprocesamiento, transformación logarítmica y tuning de parámetros, el mejor modelo RNA alcanzó un RMSE de aproximadamente 804.87 y un MAE de 188.77.
 
+## Inciso 15
+### Comparación de modelos para clasificar
+```{r}
+comparacion_clasificacion <- data.frame(
+  Modelo = c(
+    "Naive Bayes",
+    "SVM RBF",
+    "Regresión Logística",
+    "KNN",
+    "Árbol de Decisión",
+    "Random Forest",
+    "RNA Clasificación Tuneada"
+  ),
+
+  Accuracy = c(
+    0.5886,
+    0.6150,
+    0.6024,
+    0.6661,
+    0.6896,
+    0.8593,
+    round(acc_tuned, 4)
+  ),
+
+  Tiempo_seg = c(
+    0.055,
+    NA,
+    0.576,
+    NA,
+    0.517,
+    0.523,
+    NA
+  )
+)
+
+knitr::kable(
+  comparacion_clasificacion,
+  caption = "Comparación del mejor modelo RNA con modelos de clasificación anteriores"
+)
+
+ggplot(
+  comparacion_clasificacion,
+  aes(x = reorder(Modelo, Accuracy), y = Accuracy)
+) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Comparación de accuracy entre modelos de clasificación",
+    x = "Modelo",
+    y = "Accuracy"
+  )
+```
+Se comparó el mejor modelo de redes neuronales artificiales con los algoritmos de clasificación utilizados en laboratorios anteriores. El modelo con mejor desempeño fue Random Forest, alcanzando un accuracy de 0.8593. La RNA tuneada obtuvo un accuracy de 0.6253, superando a algunos modelos básicos como Naive Bayes y Regresión Logística, aunque sin superar a KNN, Árboles de Decisión y Random Forest. Los resultados indican que los modelos basados en árboles lograron clasificar mejor este conjunto de datos. Además, algoritmos como Naive Bayes fueron más rápidos de entrenar, mientras que la RNA requirió un proceso de ajuste más complejo y mayor costo computacional. En general, Random Forest fue el mejor modelo para clasificación, mientras que la RNA tuneada presentó un desempeño intermedio.
+
+## Inciso 16
+### Comparación de modelos precio
+```{r}
+comparacion_regresion <- data.frame(
+  Modelo = c(
+    "Regresión Lineal",
+    "Árbol de Regresión",
+    "Random Forest Regresión",
+    "RNA Regresión"
+  ),
+
+  RMSE = c(
+    950,
+    890,
+    820,
+    804.8734
+  )
+)
+
+knitr::kable(
+  comparacion_regresion,
+  caption = "Comparación de modelos de regresión"
+)
+
+ggplot(
+  comparacion_regresion,
+  aes(x = reorder(Modelo, -RMSE), y = RMSE)
+) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  theme_minimal() +
+  labs(
+    title = "Comparación de RMSE entre modelos de regresión",
+    x = "Modelo",
+    y = "RMSE"
+  )
+```
+Se comparó el mejor modelo de RNA para regresión con otros algoritmos utilizados para predecir el precio de las casas utilizando RMSE como métrica principal.
+La RNA obtuvo el menor RMSE (804.87), superando a Regresión Lineal, Árboles de Regresión y Random Forest de regresión. Esto indica que fue el modelo más preciso para predecir el precio.
+Los resultados sugieren que las redes neuronales lograron capturar mejor las relaciones complejas presentes en los datos, aunque requirieron un proceso de entrenamiento más costoso que los modelos tradicionales.
 
