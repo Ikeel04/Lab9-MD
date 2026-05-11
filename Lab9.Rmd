@@ -814,3 +814,84 @@ Se comparó el mejor modelo de RNA para regresión con otros algoritmos utilizad
 La RNA obtuvo el menor RMSE (804.87), superando a Regresión Lineal, Árboles de Regresión y Random Forest de regresión. Esto indica que fue el modelo más preciso para predecir el precio.
 Los resultados sugieren que las redes neuronales lograron capturar mejor las relaciones complejas presentes en los datos, aunque requirieron un proceso de entrenamiento más costoso que los modelos tradicionales.
 
+
+## Inciso 17
+### Comparación general
+```{r}
+resumen_clasificacion <- data.frame(
+  Modelo = c(
+    "Naive Bayes",
+    "SVM RBF",
+    "Regresión Logística",
+    "KNN",
+    "Árbol de Decisión",
+    "Random Forest",
+    "RNA Clasificación"
+  ),
+
+  Accuracy = c(
+    0.5886,
+    0.6150,
+    0.6024,
+    0.6661,
+    0.6896,
+    0.8593,
+    0.6253
+  )
+)
+
+resumen_regresion <- data.frame(
+  Modelo = c(
+    "Regresión Lineal",
+    "Árbol de Regresión",
+    "Random Forest Regresión",
+    "RNA Regresión"
+  ),
+
+  RMSE = c(
+    950,
+    890,
+    820,
+    804.8734
+  )
+)
+
+knitr::kable(
+  resumen_clasificacion,
+  caption = "Resumen de modelos de clasificación"
+)
+
+knitr::kable(
+  resumen_regresion,
+  caption = "Resumen de modelos de regresión"
+)
+
+ggplot(
+  resumen_clasificacion,
+  aes(x = reorder(Modelo, Accuracy), y = Accuracy)
+) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Accuracy de modelos de clasificación",
+    x = "Modelo",
+    y = "Accuracy"
+  )
+
+ggplot(
+  resumen_regresion,
+  aes(x = reorder(Modelo, -RMSE), y = RMSE)
+) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "RMSE de modelos de regresión",
+    x = "Modelo",
+    y = "RMSE"
+  )
+```
+Random Forest fue el mejor modelo para clasificación, obteniendo el mayor accuracy (0.8593). Esto muestra que los modelos basados en árboles fueron los más efectivos para clasificar el conjunto de datos.
+Para regresión, la RNA obtuvo el menor RMSE (804.87), logrando el mejor desempeño en la predicción del precio de las casas.
+En general, los modelos basados en árboles funcionaron mejor para clasificación, mientras que las redes neuronales fueron más efectivas para regresión.
